@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>กล้องมือถือ | ระบบคัดแยกพริก</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #16140F;
+    --surface: #221E17;
+    --surface-2: #2C2720;
+    --border: #3A342A;
+    --text: #F2EDE4;
+    --text-muted: #9C9587;
+    --healthy: #7FB069;
+    --unhealthy: #E0603F;
+    --amber: #D9A441;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    padding: 20px 16px 40px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+  h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    margin: 4px 0 16px;
+  }
+  .video-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3/4;
+    background: #000;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .rec-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0,0,0,0.55);
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .rec-dot.on { background: var(--unhealthy); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .controls { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .btn {
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  .btn.start { background: var(--healthy); color: #16220F; }
+  .btn.stop { background: var(--unhealthy); color: #2A0F08; }
+
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .setting-row label { font-size: 13px; color: var(--text-muted); }
+  .setting-row input {
+    width: 70px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 8px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .status-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .status-card .big { color: var(--text); font-size: 15px; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Chili sorting system</div>
+  <h1>กล้องมือถือ (แทน ESP32-CAM)</h1>
+
+  <div class="video-wrap">
+    <video id="preview" autoplay playsinline muted></video>
+    <div class="rec-badge"><span class="rec-dot" id="rec-dot"></span><span id="rec-text">หยุดอยู่</span></div>
+  </div>
+
+  <div class="controls">
+    <div class="setting-row">
+      <label>ถ่ายทุก (วินาที)</label>
+      <input type="number" id="interval-input" value="3" min="1" max="30" step="1">
+    </div>
+    <button class="btn start" id="toggle-btn">▶ เริ่มส่งภาพขึ้นเว็บ</button>
+    <div class="status-card">
+      <div class="big" id="status-main">ยังไม่เริ่มทำงาน</div>
+      <div id="status-sub">กดปุ่มด้านบนเพื่อขออนุญาตใช้กล้องและเริ่มส่งภาพ</div>
+    </div>
+  </div>
+
+<script>
+let stream = null;
+let intervalId = null;
+let running = false;
+
+const video = document.getElementById('preview');
+const toggleBtn = document.getElementById('toggle-btn');
+const intervalInput = document.getElementById('interval-input');
+const recDot = document.getElementById('rec-dot');
+const recText = document.getElementById('rec-text');
+const statusMain = document.getElementById('status-main');
+const statusSub = document.getElementById('status-sub');
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },  // กล้องหลัง (หันออก) ถ้ามี
+      audio: false,
+    });
+    video.srcObject = stream;
+  } catch (err) {
+    statusMain.textContent = 'ขอใช้กล้องไม่สำเร็จ';
+    statusSub.textContent = 'กรุณาอนุญาตให้เว็บนี้ใช้กล้อง แล้วลองใหม่ (ต้องเปิดผ่าน https หรือ localhost เท่านั้น)';
+    throw err;
+  }
+}
+
+function captureAndSend() {
+  if (!stream) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    try {
+      const res = await fetch('/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/jpeg', 'X-Source': 'mobile-camera' },
+        body: blob,
+      });
+      const data = await res.json();
+      const now = new Date().toLocaleTimeString('th-TH');
+      if (res.ok) {
+        statusMain.textContent = 'ส่งภาพสำเร็จ · ' + now;
+        statusSub.textContent = 'ผลล่าสุด: ' + (data.label || '-') +
+          (data.confidence ? ' (' + Math.round(data.confidence * 100) + '%)' : '');
+      } else {
+        statusMain.textContent = 'ส่งภาพไม่สำเร็จ · ' + now;
+        statusSub.textContent = data.error || 'ไม่ทราบสาเหตุ';
+      }
+    } catch (err) {
+      statusMain.textContent = 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+      statusSub.textContent = 'เช็คว่ามือถืออยู่ WiFi วงเดียวกับเซิร์ฟเวอร์ไหม';
+    }
+  }, 'image/jpeg', 0.85);
+}
+
+toggleBtn.addEventListener('click', async () => {
+  if (!running) {
+    if (!stream) {
+      statusMain.textContent = 'กำลังขอใช้กล้อง...';
+      await startCamera();
+    }
+    const intervalMs = Math.max(1, parseInt(intervalInput.value) || 3) * 1000;
+    captureAndSend();  // ส่งภาพแรกทันที ไม่ต้องรอรอบแรก
+    intervalId = setInterval(captureAndSend, intervalMs);
+    running = true;
+    toggleBtn.textContent = '■ หยุดส่งภาพ';
+    toggleBtn.className = 'btn stop';
+    recDot.classList.add('on');
+    recText.textContent = 'กำลังส่งภาพ';
+    intervalInput.disabled = true;
+  } else {
+    clearInterval(intervalId);
+    running = false;
+    toggleBtn.textContent = '▶ เริ่มส่งภาพขึ้นเว็บ';
+    toggleBtn.className = 'btn start';
+    recDot.classList.remove('on');
+    recText.textContent = 'หยุดอยู่';
+    intervalInput.disabled = false;
+    statusMain.textContent = 'หยุดส่งภาพแล้ว';
+    statusSub.textContent = 'กดเริ่มใหม่ได้ทุกเมื่อ';
+  }
+});
+</script>
+</body>
+</html>
